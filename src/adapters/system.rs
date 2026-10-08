@@ -1,6 +1,7 @@
 //! Opening things and running the user's commands, with real processes.
 
 use std::io::Write;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -18,7 +19,11 @@ impl Launcher for SystemLauncher {
             "xdg-open"
         };
         let mut command = Command::new(opener);
+        // A process group of its own: the opener may leave the browser
+        // starting in the background, and the hangup that ends the overlay
+        // pane's process group would kill it.
         command
+            .process_group(0)
             .arg(target)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

@@ -7,6 +7,13 @@ the plugin notices; the build pipeline and the docs live in the commit history.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-08
+
+### Fixed
+- Opening a URL or file (Preview of a URL, Ctrl+hint) reaches the browser.
+  The opener runs in a process group of its own, so the hangup that ends
+  the overlay pane no longer kills the browser while it starts.
+
 ## [0.2.2] - 2026-10-08
 
 ### Changed

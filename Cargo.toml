@@ -1,6 +1,6 @@
 [package]
 name = "herdr-fingers"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 rust-version = "1.85"
 description = "tmux-fingers for Herdr: type a short hint to preview, copy, paste or open a path or URL visible in a pane"
