@@ -146,11 +146,23 @@ impl OverlayGeometry {
         })
     }
 
+    /// Whether `frame` covers the whole tab area. Herdr can also size the
+    /// overlay to the focused pane alone; the pane then starts at the
+    /// frame's top-left corner instead of at its offset in the tab.
+    fn frame_covers_area(&self, frame: Rect) -> bool {
+        frame.width >= self.area.width && frame.height >= self.area.height
+    }
+
     /// The cells of `frame` the captured pane is redrawn into (clipped).
     pub fn content_rect(&self, frame: Rect) -> Rect {
+        let (dx, dy) = if self.frame_covers_area(frame) {
+            (self.pane.x, self.pane.y)
+        } else {
+            (0, 0)
+        };
         Rect::new(
-            frame.x.saturating_add(self.pane.x),
-            frame.y.saturating_add(self.pane.y),
+            frame.x.saturating_add(dx),
+            frame.y.saturating_add(dy),
             self.pane.width,
             self.pane.height,
         )
@@ -158,8 +170,12 @@ impl OverlayGeometry {
     }
 
     /// A one-row strip of `frame` left blank by the pane, for the status
-    /// line; `None` when the pane fills the frame.
+    /// line; `None` when the pane fills the frame or the frame holds the
+    /// pane alone.
     pub fn status_rect(&self, frame: Rect) -> Option<Rect> {
+        if !self.frame_covers_area(frame) {
+            return None;
+        }
         let content = self.content_rect(frame);
         let last_row = frame.bottom().saturating_sub(1);
         let strip = if content.bottom() < frame.bottom() {
@@ -252,9 +268,17 @@ mod tests {
         assert_eq!(geometry.content_rect(frame), Rect::new(51, 21, 49, 19));
         assert_eq!(geometry.status_rect(frame), Some(Rect::new(0, 39, 51, 1)));
         assert_eq!(
-            geometry.content_rect(Rect::new(0, 0, 80, 30)),
-            Rect::new(51, 21, 29, 9)
+            geometry.content_rect(Rect::new(0, 0, 30, 10)),
+            Rect::new(0, 0, 30, 10)
         );
+    }
+
+    #[test]
+    fn a_frame_sized_to_the_pane_draws_the_pane_at_its_origin() {
+        let geometry = OverlayGeometry::locate(&layout(false), "right").unwrap();
+        let frame = Rect::new(0, 0, 50, 19);
+        assert_eq!(geometry.content_rect(frame), Rect::new(0, 0, 49, 19));
+        assert_eq!(geometry.status_rect(frame), None);
     }
 
     #[test]

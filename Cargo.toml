@@ -1,6 +1,6 @@
 [package]
 name = "herdr-fingers"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "tmux-fingers for Herdr: type a short hint to copy, paste or open anything visible in a pane"

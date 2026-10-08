@@ -7,6 +7,13 @@ the plugin notices; the build pipeline and the docs live in the commit history.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-08
+
+### Fixed
+- Hints show on every pane of a split tab, not only on the top-left one.
+  When Herdr sizes the overlay to the focused pane, the pane is drawn at
+  the overlay's top-left corner instead of off screen.
+
 ## [0.1.0] - 2026-09-22
 
 ### Added
