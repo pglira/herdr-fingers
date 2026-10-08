@@ -1,8 +1,8 @@
 //! The image popup: decodes the image and draws it centered with the Kitty
 //! graphics protocol, which Herdr forwards to a capable outer terminal. The
-//! footer shows the path; j/k (or the arrow keys) step to the next/previous
-//! image in the same directory, y copies the absolute path to the clipboard
-//! (OSC 52), any other key closes the popup.
+//! footer shows the path; n/N step to the next/previous image in the same
+//! directory, y copies the absolute path to the clipboard (OSC 52), q or Esc
+//! closes the popup.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{self, WindowSize};
 use crossterm::{cursor, execute, queue, style};
 use image::DynamicImage;
@@ -63,14 +63,19 @@ pub enum Step {
     Previous,
     Copy,
     Close,
+    Ignore,
 }
 
-pub fn step_for(code: KeyCode) -> Step {
+/// Maps a key; Shift+n counts as `N` whether the terminal reports it as an
+/// uppercase letter or as a lowercase one with the Shift modifier.
+pub fn step_for(code: KeyCode, modifiers: KeyModifiers) -> Step {
     match code {
-        KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => Step::Next,
-        KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => Step::Previous,
+        KeyCode::Char('n') if modifiers.contains(KeyModifiers::SHIFT) => Step::Previous,
+        KeyCode::Char('n') => Step::Next,
+        KeyCode::Char('N') => Step::Previous,
         KeyCode::Char('y') => Step::Copy,
-        _ => Step::Close,
+        KeyCode::Char('q') | KeyCode::Esc => Step::Close,
+        _ => Step::Ignore,
     }
 }
 
@@ -97,22 +102,25 @@ fn run(out: &mut impl Write, images: &[PathBuf], mut index: usize) -> io::Result
     loop {
         let mut copied = false;
         match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => match step_for(key.code) {
-                Step::Close => return Ok(()),
-                Step::Copy => {
-                    let path = std::path::absolute(&images[index])?;
-                    write!(out, "{}", osc52_sequence(&path.display().to_string()))?;
-                    copied = true;
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                match step_for(key.code, key.modifiers) {
+                    Step::Close => return Ok(()),
+                    Step::Ignore => continue,
+                    Step::Copy => {
+                        let path = std::path::absolute(&images[index])?;
+                        write!(out, "{}", osc52_sequence(&path.display().to_string()))?;
+                        copied = true;
+                    }
+                    step => {
+                        index = if step == Step::Next {
+                            (index + 1) % images.len()
+                        } else {
+                            (index + images.len() - 1) % images.len()
+                        };
+                        image = decode(&images[index]);
+                    }
                 }
-                step => {
-                    index = if step == Step::Next {
-                        (index + 1) % images.len()
-                    } else {
-                        (index + images.len() - 1) % images.len()
-                    };
-                    image = decode(&images[index]);
-                }
-            },
+            }
             Event::Resize(..) => size = settled_size()?,
             _ => continue,
         }
@@ -179,7 +187,7 @@ fn draw(
     let keys = if copied {
         "path copied"
     } else {
-        "j/k next/prev · y copy path"
+        "n/N next/prev · y copy path · q close"
     };
     let tail = format!("  ·  {details}  ·  {}/{count}  ·  {keys}", index + 1);
     let footer = footer(&path.display().to_string(), &tail, size.columns);
@@ -370,14 +378,27 @@ mod tests {
     }
 
     #[test]
-    fn j_and_k_step_y_copies_and_every_other_key_closes() {
-        assert_eq!(step_for(KeyCode::Char('j')), Step::Next);
-        assert_eq!(step_for(KeyCode::Right), Step::Next);
-        assert_eq!(step_for(KeyCode::Char('k')), Step::Previous);
-        assert_eq!(step_for(KeyCode::Up), Step::Previous);
-        assert_eq!(step_for(KeyCode::Char('y')), Step::Copy);
-        assert_eq!(step_for(KeyCode::Char('q')), Step::Close);
-        assert_eq!(step_for(KeyCode::Esc), Step::Close);
+    fn n_and_shift_n_step_y_copies_q_and_esc_close() {
+        assert_eq!(step_for(KeyCode::Char('n'), KeyModifiers::NONE), Step::Next);
+        assert_eq!(
+            step_for(KeyCode::Char('N'), KeyModifiers::NONE),
+            Step::Previous
+        );
+        assert_eq!(step_for(KeyCode::Char('y'), KeyModifiers::NONE), Step::Copy);
+        assert_eq!(
+            step_for(KeyCode::Char('q'), KeyModifiers::NONE),
+            Step::Close
+        );
+        assert_eq!(step_for(KeyCode::Esc, KeyModifiers::NONE), Step::Close);
+        assert_eq!(
+            step_for(KeyCode::Char('n'), KeyModifiers::SHIFT),
+            Step::Previous
+        );
+        assert_eq!(
+            step_for(KeyCode::Char('j'), KeyModifiers::NONE),
+            Step::Ignore
+        );
+        assert_eq!(step_for(KeyCode::Right, KeyModifiers::NONE), Step::Ignore);
     }
 
     #[test]

@@ -97,8 +97,8 @@ home directory. Both popups close with `q`.
 
 The image popup works wherever Herdr runs in a terminal with Kitty
 graphics (Ghostty, kitty, WezTerm), also in a dev container or over SSH.
-In it, `j`/`k` (or the arrows) step to the next or previous image of the
-directory, `y` copies the absolute path (OSC 52), any other key closes it.
+In it, `n`/`N` step to the next or previous image of the directory, `y`
+copies the absolute path (OSC 52), and `q` or `Esc` closes it.
 Supported formats: PNG, JPEG, GIF (first frame), WebP, BMP, TIFF, ICO, QOI,
 TGA, PNM and Radiance HDR.
 

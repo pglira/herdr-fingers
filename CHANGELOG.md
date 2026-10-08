@@ -7,6 +7,12 @@ the plugin notices; the build pipeline and the docs live in the commit history.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-08
+
+### Changed
+- The image popup steps with `n`/`N` instead of `j`/`k` and the arrows,
+  and closes only with `q` or `Esc`.
+
 ## [0.2.1] - 2026-10-08
 
 ### Removed
