@@ -1,6 +1,6 @@
 id = "nathan-poncet.herdr-fingers"
 name = "Herdr Fingers"
-version = "0.2.0"
+version = "0.2.1"
 min_herdr_version = "0.7.0"
 description = "tmux-fingers for Herdr: type a short hint over a path or URL in the pane to preview it (image, text, directory, browser) or copy it."
 platforms = ["linux", "macos"]

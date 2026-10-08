@@ -1,6 +1,6 @@
 [package]
 name = "herdr-fingers"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 description = "tmux-fingers for Herdr: type a short hint to preview, copy, paste or open a path or URL visible in a pane"
@@ -12,7 +12,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 base64 = "0.23"
-image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 crossterm = "0.29"
 ratatui = "0.30"
 regex = "1"

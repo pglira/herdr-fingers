@@ -41,7 +41,7 @@ pub const BUILTIN_PATTERNS: &[(&str, &str)] = &[
     // Image files, also bare names without a `/` such as "plot.png".
     (
         "image",
-        r"(?i)(?:~/|/)?(?:[\w.@+%=-]+/)*[\w.@+%=-]+\.(?:png|jpe?g|gif|webp|bmp|tiff?|ico|qoi|tga|pnm|pbm|pgm|ppm|exr|hdr)\b",
+        r"(?i)(?:~/|/)?(?:[\w.@+%=-]+/)*[\w.@+%=-]+\.(?:png|jpe?g|gif|webp|bmp|tiff?|ico|qoi|tga|pnm|pbm|pgm|ppm|hdr)\b",
     ),
     ("hex", r"(0x[0-9a-fA-F]+)"),
     ("kubernetes", "KUBERNETES_KINDS_PLACEHOLDER"),

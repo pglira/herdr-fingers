@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 /// Image file extensions the viewer decodes, lowercase.
 pub const IMAGE_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "ico", "qoi", "tga", "pnm", "pbm",
-    "pgm", "ppm", "exr", "hdr",
+    "pgm", "ppm", "hdr",
 ];
 
 /// URL schemes the system opener handles.

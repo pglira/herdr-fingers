@@ -100,7 +100,7 @@ graphics (Ghostty, kitty, WezTerm), also in a dev container or over SSH.
 In it, `j`/`k` (or the arrows) step to the next or previous image of the
 directory, `y` copies the absolute path (OSC 52), any other key closes it.
 Supported formats: PNG, JPEG, GIF (first frame), WebP, BMP, TIFF, ICO, QOI,
-TGA, PNM, OpenEXR and Radiance HDR.
+TGA, PNM and Radiance HDR.
 
 ### From other programs
 

@@ -7,6 +7,11 @@ the plugin notices; the build pipeline and the docs live in the commit history.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-08
+
+### Removed
+- OpenEXR images: their decoder depends on an unmaintained crate.
+
 ## [0.2.0] - 2026-10-08
 
 ### Added
