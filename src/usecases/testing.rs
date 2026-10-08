@@ -4,9 +4,11 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::ports::{Clipboard, Launcher, PaneHost, PickView, Picker, PortError};
+use super::ports::{Clipboard, Files, Launcher, PaneHost, PickView, Picker, PortError};
 use crate::domain::geometry::{Layout, OverlayGeometry, PanePlacement, Rect};
+use crate::domain::preview::{Entry, MenuItem};
 use crate::domain::session::{Key, Outcome, Session};
+use crate::domain::settings::PopupSize;
 
 /// One `open_overlay` call: plugin id, entrypoint, environment.
 pub(crate) type OpenedOverlay = (String, String, BTreeMap<String, String>);
@@ -22,6 +24,7 @@ pub(crate) struct FakeHost {
     pub sent: RefCell<Vec<(String, String)>>,
     pub notified: RefCell<Vec<(String, String)>>,
     pub opened: RefCell<Vec<OpenedOverlay>>,
+    pub popups: RefCell<Vec<OpenedOverlay>>,
 }
 
 impl FakeHost {
@@ -36,6 +39,7 @@ impl FakeHost {
             sent: RefCell::new(Vec::new()),
             notified: RefCell::new(Vec::new()),
             opened: RefCell::new(Vec::new()),
+            popups: RefCell::new(Vec::new()),
         }
     }
 
@@ -117,6 +121,19 @@ impl PaneHost for FakeHost {
         Ok("w1:p9".to_string())
     }
 
+    fn open_popup(
+        &self,
+        plugin_id: &str,
+        entrypoint: &str,
+        env: BTreeMap<String, String>,
+        _size: &PopupSize,
+    ) -> Result<(), PortError> {
+        self.popups
+            .borrow_mut()
+            .push((plugin_id.to_string(), entrypoint.to_string(), env));
+        Ok(())
+    }
+
     fn send_text(&self, pane_id: &str, text: &str) -> Result<(), PortError> {
         self.sent
             .borrow_mut()
@@ -129,6 +146,30 @@ impl PaneHost for FakeHost {
             .borrow_mut()
             .push((title.to_string(), body.to_string()));
         Ok(())
+    }
+}
+
+/// A file system holding the given entries, with `/home/u` as home.
+#[derive(Default)]
+pub(crate) struct FakeFiles {
+    pub entries: BTreeMap<PathBuf, Entry>,
+}
+
+impl FakeFiles {
+    pub fn with(path: &str, entry: Entry) -> Self {
+        FakeFiles {
+            entries: BTreeMap::from([(PathBuf::from(path), entry)]),
+        }
+    }
+}
+
+impl Files for FakeFiles {
+    fn entry(&self, path: &Path) -> Entry {
+        self.entries.get(path).copied().unwrap_or(Entry::Missing)
+    }
+
+    fn home(&self) -> Option<PathBuf> {
+        Some(PathBuf::from("/home/u"))
     }
 }
 
@@ -187,19 +228,29 @@ impl Launcher for RecordingLauncher {
 }
 
 /// Feeds a fixed key sequence to the real session; cancels if it runs out.
+/// A menu gets `choice` as the answer.
 pub(crate) struct ScriptedPicker {
     keys: Vec<Key>,
+    choice: Option<MenuItem>,
     pub seen_notice: Option<String>,
     pub seen_geometry: Option<OverlayGeometry>,
+    pub seen_menu: Option<(String, Vec<MenuItem>)>,
 }
 
 impl ScriptedPicker {
     pub fn new(keys: &[Key]) -> Self {
         ScriptedPicker {
             keys: keys.to_vec(),
+            choice: None,
             seen_notice: None,
             seen_geometry: None,
+            seen_menu: None,
         }
+    }
+
+    pub fn choosing(mut self, choice: MenuItem) -> Self {
+        self.choice = Some(choice);
+        self
     }
 }
 
@@ -214,5 +265,16 @@ impl Picker for ScriptedPicker {
             }
         }
         Ok(Outcome::Cancelled)
+    }
+
+    fn choose(
+        &mut self,
+        _view: &PickView<'_>,
+        _session: &Session,
+        title: &str,
+        items: &[MenuItem],
+    ) -> Result<Option<MenuItem>, PortError> {
+        self.seen_menu = Some((title.to_string(), items.to_vec()));
+        Ok(self.choice)
     }
 }

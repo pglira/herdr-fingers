@@ -16,23 +16,24 @@ Source dependencies point inward only. `tests/dependency_rule.rs` greps
 
 | Ring | Folder | Contents | May use |
 |---|---|---|---|
-| Kernel | `src/domain/` | `ansi`, `screen`, `patterns`, `matcher`, `hints`, `alphabet`, `session`, `geometry`, `settings`, `style` | `regex`, `unicode-width`, `thiserror` |
-| Use cases | `src/usecases/` | `ports` (the traits), `start`, `pick`, `testing` (fakes) | the kernel |
-| Adapters | `src/adapters/` | `herdr` implements `PaneHost`, `tui` implements `Picker`, `clipboard` implements `Clipboard`, `system` implements `Launcher`; `config` and `log` | the ports, the world |
-| Composition root | `src/app.rs`, `src/main.rs` | one function per subcommand: `start`, `ui`, `scan` | anything |
+| Kernel | `src/domain/` | `ansi`, `screen`, `patterns`, `matcher`, `hints`, `alphabet`, `session`, `geometry`, `settings`, `style`, `preview` | `regex`, `unicode-width`, `thiserror` |
+| Use cases | `src/usecases/` | `ports` (the traits), `start`, `pick`, `preview`, `testing` (fakes) | the kernel |
+| Adapters | `src/adapters/` | `herdr` implements `PaneHost`, `tui` implements `Picker`, `clipboard` implements `Clipboard`, `system` implements `Launcher`, `files` implements `Files`; `viewer` (image popup), `pager` (text popup), `config` and `log` | the ports, the world |
+| Composition root | `src/app.rs`, `src/main.rs` | one function per subcommand: `start`, `ui`, `open`, `view`, `page`, `scan` | anything |
 
 ## Ports
 
-Four traits in `usecases/ports.rs`, one per kind of side effect the use
+Five traits in `usecases/ports.rs`, one per kind of side effect the use
 cases need. Each has a real adapter and an in-memory fake in
 `usecases/testing.rs`.
 
 | Port | Real adapter | Fake | Methods |
 |---|---|---|---|
-| `PaneHost` | `HerdrClient` (socket API) | `FakeHost` | `layout`, `read_visible`, `pane_label`, `pane_cwd`, `open_overlay`, `send_text`, `notify` |
-| `Picker` | `TerminalPicker` (ratatui event loop) | `ScriptedPicker` (feeds keys to the real `Session`) | `pick(view, session) -> Outcome` |
+| `PaneHost` | `HerdrClient` (socket API) | `FakeHost` | `layout`, `read_visible`, `pane_label`, `pane_cwd`, `open_overlay`, `open_popup`, `send_text`, `notify` |
+| `Picker` | `TerminalPicker` (ratatui event loop) | `ScriptedPicker` (feeds keys to the real `Session`) | `pick(view, session) -> Outcome`, `choose(view, session, title, items) -> Option<MenuItem>` |
 | `Clipboard` | `SystemClipboard` (OSC 52 and/or a command) | `RecordingClipboard` | `copy(text)` |
 | `Launcher` | `SystemLauncher` (`open`/`xdg-open`, shell command lines) | `RecordingLauncher` | `open(target, cwd)`, `run(command_line, stdin, env, cwd)` |
+| `Files` | `SystemFiles` (metadata, NUL-byte sniff) | `FakeFiles` | `entry(path) -> Entry`, `home()` |
 
 Errors cross a port as `PortError(String)`: by the time they reach a use
 case there is nothing to do but show them.
@@ -54,7 +55,10 @@ prefix+f
         6. Screen::from_ansi → logical lines → PatternSet::find → Candidates
         7. Session::new       hints assigned (bottom first, identical texts shared)
         8. picker.pick        draw · read key · Session::press … until Picked/Cancelled
-        9. dispatch           Copy → clipboard · Paste → host.send_text · Open → launcher.open · Shell → launcher.run
+        9. picker.choose      for Menu: the menu over the same view → Preview, Copy or nothing
+       10. preview            URL → launcher.open · image → host.open_popup "viewer" · text/dir → host.open_popup "pager"
+                              (env HERDR_FINGERS_PATH) · binary/missing → host.notify
+           dispatch           Copy → clipboard · Paste → host.send_text · Open → launcher.open · Shell → launcher.run
   └─ the process exits; Herdr closes the overlay and restores focus and zoom
 ```
 

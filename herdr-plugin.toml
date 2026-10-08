@@ -1,8 +1,8 @@
 id = "nathan-poncet.herdr-fingers"
 name = "Herdr Fingers"
-version = "0.1.1"
+version = "0.2.0"
 min_herdr_version = "0.7.0"
-description = "tmux-fingers for Herdr: type a short hint to copy, paste or open any path, URL, hash or number visible in the pane."
+description = "tmux-fingers for Herdr: type a short hint over a path or URL in the pane to preview it (image, text, directory, browser) or copy it."
 platforms = ["linux", "macos"]
 
 [[build]]
@@ -11,7 +11,7 @@ command = ["cargo", "build", "--release", "--locked"]
 [[actions]]
 id = "start"
 title = "Fingers: show hints"
-description = "Label every path, URL, hash, IP, UUID and number in the focused pane; type a label to copy it (Shift pastes, Ctrl opens)."
+description = "Label every path and URL in the focused pane; type a label to preview or copy it (Shift pastes, Ctrl opens)."
 contexts = ["pane", "workspace", "global"]
 command = ["./target/release/herdr-fingers", "start"]
 
@@ -22,3 +22,19 @@ id = "overlay"
 title = "Fingers"
 placement = "overlay"
 command = ["./target/release/herdr-fingers", "ui"]
+
+# The image popup. Opened by the overlay's "Preview" with the image path in
+# its environment, never bind it directly.
+[[panes]]
+id = "viewer"
+title = "Image"
+placement = "popup"
+command = ["./target/release/herdr-fingers", "view"]
+
+# The text popup: pages a text file or lists a directory. Opened by the
+# overlay's "Preview", never bind it directly.
+[[panes]]
+id = "pager"
+title = "Preview"
+placement = "popup"
+command = ["./target/release/herdr-fingers", "page"]

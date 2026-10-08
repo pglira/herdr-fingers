@@ -7,6 +7,26 @@ the plugin notices; the build pipeline and the docs live in the commit history.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-08
+
+### Added
+- A plain hint opens a menu: preview the match or copy it (`:menu:`, the
+  new default `main_action`). A multi-selection offers only the copy.
+- Preview opens a URL in the browser, an image in a popup drawn with Kitty
+  graphics, a text file in a pager popup (`bat`, else `less`, else `more`)
+  and a directory as `ls -la`. A binary file or a missing path gives a
+  notification.
+- The image popup steps through the images of the directory with `j`/`k`
+  and copies the path with `y`.
+- `herdr-fingers open <path-or-url>` shows the preview from other programs,
+  such as a file manager.
+- An `image` pattern for image files, also without a `/` in the name.
+- `popup_width` and `popup_height` set the size of the preview popups.
+
+### Changed
+- Only the patterns for paths and URLs are on by default: `url`, `path`,
+  `image`, `git-status` and `diff`.
+
 ## [0.1.1] - 2026-10-08
 
 ### Fixed

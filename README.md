@@ -1,10 +1,18 @@
 # herdr-fingers
 
-**tmux-fingers for [Herdr](https://herdr.dev).** Press a key, every path,
-URL, Git SHA, IP, UUID and number on screen gets a one- or two-letter hint;
-type the hint and it is on your clipboard. Hold Shift to type it into the
-pane instead, Ctrl to open it. No mouse, no selection dragging, no
+**tmux-fingers for [Herdr](https://herdr.dev), with previews.** Press a
+key, every path and URL on screen gets a one- or two-letter hint. Type the
+hint, and a menu asks what to do with it: **preview** it or **copy** it.
+Preview shows an image in the terminal, pages a text file, lists a
+directory, or opens a URL in the browser. Hold Shift to type the match into
+the pane instead, Ctrl to open it. No mouse, no selection dragging, no
 scrolling back to find the thing.
+
+> This is a fork of
+> [nathan-poncet/herdr-fingers](https://github.com/nathan-poncet/herdr-fingers).
+> It adds the preview menu, the image viewer of
+> [herdr-image-hints](https://github.com/pglira/herdr-image-hints), and
+> hints on every pane of a split tab.
 
 [![CI](https://github.com/nathan-poncet/herdr-fingers/actions/workflows/ci.yml/badge.svg)](https://github.com/nathan-poncet/herdr-fingers/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
@@ -24,7 +32,7 @@ layouts, same actions and multi-select, running as a native Herdr plugin.
 ## Install
 
 ```sh
-herdr plugin install nathan-poncet/herdr-fingers
+herdr plugin install pglira/herdr-fingers
 ```
 
 Herdr clones the repository and builds it (a Rust toolchain is required:
@@ -54,7 +62,7 @@ screen, where the freshest output is; identical texts share one hint.
 
 | Key | Does |
 |---|---|
-| hint (`a`, `sd`…) | copy the match to the clipboard |
+| hint (`a`, `sd`…) | open the menu for the match: `p` preview, `c` copy |
 | `Shift` + hint | type the match into the pane |
 | `Ctrl` + hint | open the match: URLs in the browser, files in their app |
 | `Alt` + hint | custom action (none by default) |
@@ -68,9 +76,58 @@ the terminal wrapped over two rows is one hint, and copies without the line
 break. The overlay redraws the pane exactly where it is — with its own
 colors — even when the tab is split.
 
+In the menu, `p` or `c` choose directly; `j`/`k` (or the arrows) and
+`Enter` work too, and `Esc` or `q` close it. A multi-selection offers only
+the copy.
+
+## Preview
+
+Preview decides by what the match is:
+
+| Match | Preview |
+|---|---|
+| URL (`http(s)://`, `ftp://`, `file://`) | opens with `xdg-open` (`open` on macOS) |
+| image file | an image popup, drawn with the Kitty graphics protocol |
+| text file | a pager popup: `bat` (or `batcat`) when installed, else `less`, else `more` |
+| directory | `ls -la` in the same pager |
+| binary file, missing path | a Herdr notification |
+
+A relative path is taken from the pane's working directory; `~/` is your
+home directory. Both popups close with `q`.
+
+The image popup works wherever Herdr runs in a terminal with Kitty
+graphics (Ghostty, kitty, WezTerm), also in a dev container or over SSH.
+In it, `j`/`k` (or the arrows) step to the next or previous image of the
+directory, `y` copies the absolute path (OSC 52), any other key closes it.
+Supported formats: PNG, JPEG, GIF (first frame), WebP, BMP, TIFF, ICO, QOI,
+TGA, PNM, OpenEXR and Radiance HDR.
+
+### From other programs
+
+`herdr-fingers open <path-or-url>` shows the same preview from any program
+that runs in a Herdr pane. The binary is at `target/release/herdr-fingers`
+in the plugin directory:
+
+```sh
+root="$(herdr plugin list --plugin nathan-poncet.herdr-fingers --json | jq -r '.result.plugins[0].plugin_root')"
+ln -s "$root/target/release/herdr-fingers" ~/.local/bin/herdr-fingers
+```
+
+For example, a [yazi](https://yazi-rs.github.io) key that previews the
+hovered file (`keymap.toml`):
+
+```toml
+[[mgr.prepend_keymap]]
+on   = "<C-y>"
+run  = "shell 'herdr-fingers open %h'"
+desc = "Preview in a herdr popup"
+```
+
 ## What gets a hint
 
-The tmux-fingers built-ins, ported one for one:
+The tmux-fingers built-ins, ported one for one, plus `image`. Only the
+patterns for paths and URLs are on by default: `url`, `path`, `image`,
+`git-status` and `diff`. Turn on others with `enabled_builtin_patterns`.
 
 | Name | Matches |
 |---|---|
@@ -80,6 +137,7 @@ The tmux-fingers built-ins, ported one for one:
 | `digit` | numbers of four digits or more |
 | `url` | `http(s)://`, `git@`, `git://`, `ssh://`, `ftp://`, `file:///` |
 | `path` | anything with a `/` in it: `src/main.rs`, `~/.config`, `/etc/hosts` |
+| `image` | image files, also without a `/`: `plot.png`, `out/fig.JPG` |
 | `hex` | `0x…` numbers |
 | `kubernetes` | Kubernetes resource names (`configmap/…`, `deployment.apps/…`) |
 | `kubernetes-pod` | deployment-managed pod names (`nginx-66b6c48dd5-7xb2r`) |
@@ -106,12 +164,15 @@ keyboard_layout = "azerty"          # or qwerty-homerow, dvorak, colemak, …
 # alphabet = "asdfghjkl"            # your own keys instead of a layout
 hint_position = "left"              # or "right"
 
-main_action = ":copy:"              # plain hint
+main_action = ":menu:"              # plain hint; ":copy:" skips the menu
 shift_action = ":paste:"            # Shift + hint
 ctrl_action = ":open:"              # Ctrl + hint
 alt_action = ""                     # Alt + hint; e.g. "xargs nvim" or a script
 
-enabled_builtin_patterns = ["url", "path", "sha", "git-status"]
+enabled_builtin_patterns = ["url", "path", "image", "sha"]
+
+popup_width = "85%"                 # preview popups: cells or a percentage
+popup_height = "85%"
 
 [[patterns]]
 name = "ticket"
@@ -129,7 +190,7 @@ backdrop = { dim = true }           # dim everything that is not a match
 
 ### Actions
 
-`:copy:`, `:paste:` and `:open:` are built in; `""` does nothing. Anything
+`:menu:`, `:copy:`, `:paste:` and `:open:` are built in; `""` does nothing. Anything
 else is a command line, run from the pane's working directory with the
 picked text on its **stdin** and two environment variables, exactly like
 tmux-fingers: `MODIFIER` (`main`, `shift`, `ctrl` or `alt`) and `HINT`.
@@ -200,7 +261,7 @@ herdr-fingers scan --width <pane width> < dump.txt      # hint, row:col, text
 ## Build from source
 
 ```sh
-git clone https://github.com/nathan-poncet/herdr-fingers.git
+git clone https://github.com/pglira/herdr-fingers.git
 cd herdr-fingers
 cargo build --release
 herdr plugin link "$PWD"

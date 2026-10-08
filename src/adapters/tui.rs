@@ -1,9 +1,10 @@
 //! Draws the captured pane back, hints on top, and turns key presses into
-//! kernel [`Key`]s.
+//! kernel [`Key`]s. After a pick it can show a menu over the same view.
 
 use std::io;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::DefaultTerminal;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect as UiRect;
 use ratatui::style::{Color as UiColor, Modifier as UiModifier, Style};
@@ -12,6 +13,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use unicode_width::UnicodeWidthStr;
 
 use crate::domain::geometry::{OverlayGeometry, Rect};
+use crate::domain::preview::MenuItem;
 use crate::domain::screen::Screen;
 use crate::domain::session::{Key, Modifier, Outcome, Session, Target};
 use crate::domain::settings::{HintPosition, Theme};
@@ -30,25 +32,60 @@ pub struct View<'a> {
 
 const MIN_STATUS_WIDTH: u16 = 24;
 
-/// The real overlay: ratatui on the pane's terminal.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct TerminalPicker;
+/// The real overlay: ratatui on the pane's terminal, set up on first use
+/// and restored when the picker is dropped.
+#[derive(Default)]
+pub struct TerminalPicker {
+    terminal: Option<DefaultTerminal>,
+}
+
+impl TerminalPicker {
+    fn terminal(&mut self) -> &mut DefaultTerminal {
+        self.terminal.get_or_insert_with(ratatui::init)
+    }
+}
+
+impl Drop for TerminalPicker {
+    fn drop(&mut self) {
+        if self.terminal.take().is_some() {
+            ratatui::restore();
+        }
+    }
+}
 
 impl Picker for TerminalPicker {
     fn pick(&mut self, view: &PickView<'_>, session: &mut Session) -> Result<Outcome, PortError> {
-        run(view.screen, session, view.theme, view.geometry, view.notice).map_err(PortError::new)
+        run(
+            self.terminal(),
+            view.screen,
+            session,
+            view.theme,
+            view.geometry,
+            view.notice,
+        )
+        .map_err(PortError::new)
+    }
+
+    fn choose(
+        &mut self,
+        view: &PickView<'_>,
+        session: &Session,
+        title: &str,
+        items: &[MenuItem],
+    ) -> Result<Option<MenuItem>, PortError> {
+        choose(self.terminal(), view, session, title, items).map_err(PortError::new)
     }
 }
 
 /// Runs the overlay until the user picks something or gives up.
 pub fn run(
+    terminal: &mut DefaultTerminal,
     screen: &Screen,
     session: &mut Session,
     theme: &Theme,
     geometry: Option<&OverlayGeometry>,
     notice: Option<&str>,
 ) -> io::Result<Outcome> {
-    let mut terminal = ratatui::init();
     let outcome = loop {
         terminal.draw(|frame| {
             let view = View {
@@ -75,8 +112,142 @@ pub fn run(
             _ => {}
         }
     };
-    ratatui::restore();
     Ok(outcome)
+}
+
+/// What a key does in the menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuKey {
+    Move(usize),
+    Choose(MenuItem),
+    Close,
+    Ignore,
+}
+
+/// Maps a key press in the menu: an entry's own key or Enter chooses, the
+/// arrows, j/k and Tab move, Esc, q and Ctrl+C close.
+pub fn menu_key(key: KeyEvent, items: &[MenuItem], selected: usize) -> MenuKey {
+    let count = items.len().max(1);
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => MenuKey::Close,
+        KeyCode::Char('c') if ctrl => MenuKey::Close,
+        KeyCode::Enter => items
+            .get(selected)
+            .map_or(MenuKey::Close, |item| MenuKey::Choose(*item)),
+        KeyCode::Down | KeyCode::Tab | KeyCode::Char('j') => MenuKey::Move((selected + 1) % count),
+        KeyCode::Up | KeyCode::BackTab | KeyCode::Char('k') => {
+            MenuKey::Move((selected + count - 1) % count)
+        }
+        KeyCode::Char(ch) => items
+            .iter()
+            .find(|item| item.key() == ch.to_ascii_lowercase())
+            .map_or(MenuKey::Ignore, |item| MenuKey::Choose(*item)),
+        _ => MenuKey::Ignore,
+    }
+}
+
+/// Shows the menu over the overlay until the user chooses or closes it.
+fn choose(
+    terminal: &mut DefaultTerminal,
+    view: &PickView<'_>,
+    session: &Session,
+    title: &str,
+    items: &[MenuItem],
+) -> io::Result<Option<MenuItem>> {
+    let mut selected = 0;
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            let page = View {
+                screen: view.screen,
+                session,
+                theme: view.theme,
+                geometry: view.geometry,
+                notice: view.notice,
+            };
+            render(area, frame.buffer_mut(), &page);
+            let frame_rect = from_ui(area);
+            let content = view
+                .geometry
+                .map_or(frame_rect, |geometry| geometry.content_rect(frame_rect));
+            paint_menu(
+                frame.buffer_mut(),
+                content,
+                view.theme,
+                title,
+                items,
+                selected,
+            );
+        })?;
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match menu_key(key, items, selected) {
+                MenuKey::Move(index) => selected = index,
+                MenuKey::Choose(item) => return Ok(Some(item)),
+                MenuKey::Close => return Ok(None),
+                MenuKey::Ignore => {}
+            }
+        }
+    }
+}
+
+/// A box centered on the pane: the picked text as its title, one line per
+/// entry with its key, the selected entry highlighted.
+fn paint_menu(
+    buf: &mut Buffer,
+    content: Rect,
+    theme: &Theme,
+    title: &str,
+    items: &[MenuItem],
+    selected: usize,
+) {
+    const FOOTER: &str = " enter choose · esc close ";
+    let lines: Vec<String> = items
+        .iter()
+        .map(|item| format!(" {}  {} ", item.key(), item.label()))
+        .collect();
+    let inner = lines
+        .iter()
+        .map(|line| line.width())
+        .chain([title.width() + 2, FOOTER.width()])
+        .max()
+        .unwrap_or(0);
+    let width = u16::try_from(inner + 2)
+        .unwrap_or(u16::MAX)
+        .min(content.width);
+    let height = u16::try_from(lines.len() + 2)
+        .unwrap_or(u16::MAX)
+        .min(content.height);
+    let area = UiRect::new(
+        content.x + content.width.saturating_sub(width) / 2,
+        content.y + content.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    Clear.render(area, buf);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {title} "))
+        .title_bottom(FOOTER);
+    let highlight = to_ui_style(theme.hint);
+    let paragraph = Paragraph::new(
+        lines
+            .into_iter()
+            .enumerate()
+            .map(|(index, line)| {
+                let style = if index == selected {
+                    highlight
+                } else {
+                    Style::default()
+                };
+                Line::from(Span::styled(line, style))
+            })
+            .collect::<Vec<_>>(),
+    )
+    .block(block);
+    paragraph.render(area, buf);
 }
 
 /// Shows `message` full screen and waits for a key, so an error is read
@@ -302,7 +473,7 @@ fn paint_status(buf: &mut Buffer, area: Rect, view: &View<'_>) {
 
 fn paint_help(buf: &mut Buffer, area: UiRect, theme: &Theme) {
     let lines = [
-        "type a hint      pick the match under it",
+        "type a hint      main action (default: menu to preview or copy)",
         "SHIFT + hint     shift action (default: paste into the pane)",
         "CTRL + hint      ctrl action (default: open URL or file)",
         "ALT + hint       alt action (default: none)",

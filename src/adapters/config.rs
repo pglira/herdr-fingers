@@ -7,7 +7,9 @@ use thiserror::Error;
 
 use crate::domain::alphabet::{Alphabet, AlphabetError};
 use crate::domain::patterns::{self, PatternError, PatternSet, PatternSpec};
-use crate::domain::settings::{Action, Actions, ClipboardMode, HintPosition, Settings, Theme};
+use crate::domain::settings::{
+    Action, Actions, ClipboardMode, HintPosition, PopupSize, Settings, Theme,
+};
 use crate::domain::style::{Color, ColorParseError, TextStyle};
 
 /// The commented default configuration, written on first run.
@@ -53,6 +55,8 @@ struct FileConfig {
     clipboard_command: Vec<String>,
     show_copied_notification: Option<bool>,
     multi_separator: Option<String>,
+    popup_width: Option<String>,
+    popup_height: Option<String>,
     #[serde(default)]
     style: StyleConfig,
 }
@@ -148,7 +152,7 @@ pub fn parse(text: &str) -> Result<Settings, ConfigError> {
             let names: Vec<&str> = names.iter().map(String::as_str).collect();
             patterns::builtin_specs(&names)?
         }
-        None => patterns::builtin_specs(&patterns::builtin_names())?,
+        None => patterns::builtin_specs(patterns::DEFAULT_PATTERNS)?,
     };
     let custom: Vec<PatternSpec> = file
         .patterns
@@ -177,6 +181,26 @@ pub fn parse(text: &str) -> Result<Settings, ConfigError> {
                 "clipboard must be \"osc52\", \"system\" or \"both\", got \"{other}\""
             )));
         }
+    };
+
+    let popup_size = |value: &Option<String>, key: &str, fallback: String| match value {
+        None => Ok(fallback),
+        Some(value) if PopupSize::is_valid(value.trim()) => Ok(value.trim().to_string()),
+        Some(value) => Err(ConfigError::Invalid(format!(
+            "{key} must be a cell count or a percentage such as \"85%\", got \"{value}\""
+        ))),
+    };
+    let popup = PopupSize {
+        width: popup_size(
+            &file.popup_width,
+            "popup_width",
+            defaults.popup.width.clone(),
+        )?,
+        height: popup_size(
+            &file.popup_height,
+            "popup_height",
+            defaults.popup.height.clone(),
+        )?,
     };
 
     let default_theme = Theme::default();
@@ -227,13 +251,14 @@ pub fn parse(text: &str) -> Result<Settings, ConfigError> {
             .show_copied_notification
             .unwrap_or(defaults.notify_on_copy),
         multi_separator: file.multi_separator.unwrap_or(defaults.multi_separator),
+        popup,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::patterns::builtin_names;
+    use crate::domain::patterns::DEFAULT_PATTERNS;
 
     #[test]
     fn the_shipped_default_file_parses_to_the_default_settings() {
@@ -247,13 +272,15 @@ mod tests {
         assert_eq!(parsed.clipboard_command, defaults.clipboard_command);
         assert_eq!(parsed.notify_on_copy, defaults.notify_on_copy);
         assert_eq!(parsed.multi_separator, defaults.multi_separator);
+        assert_eq!(parsed.popup, defaults.popup);
     }
 
     #[test]
     fn an_empty_file_is_the_defaults() {
         let parsed = parse("").unwrap();
-        assert_eq!(parsed.patterns.names(), builtin_names());
+        assert_eq!(parsed.patterns.names(), DEFAULT_PATTERNS);
         assert_eq!(parsed.actions, Actions::default());
+        assert_eq!(parsed.actions.main, Action::Menu);
     }
 
     #[test]
@@ -322,6 +349,10 @@ backdrop = { dim = true }
         assert!(matches!(
             parse("[style]\nhint = { fg = \"chartreuse\" }"),
             Err(ConfigError::Color(_))
+        ));
+        assert!(matches!(
+            parse("popup_width = \"120%\""),
+            Err(ConfigError::Invalid(_))
         ));
         assert!(matches!(parse("typo = 1"), Err(ConfigError::Parse(_))));
     }

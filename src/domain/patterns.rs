@@ -38,6 +38,11 @@ pub const BUILTIN_PATTERNS: &[(&str, &str)] = &[
         r#"((https?://|git@|git://|ssh://|ftp://|file:///)[^\s()"']+)"#,
     ),
     ("path", r"(([.\w\-~\$@]+)?(/[.\w\-@]+)+/?)"),
+    // Image files, also bare names without a `/` such as "plot.png".
+    (
+        "image",
+        r"(?i)(?:~/|/)?(?:[\w.@+%=-]+/)*[\w.@+%=-]+\.(?:png|jpe?g|gif|webp|bmp|tiff?|ico|qoi|tga|pnm|pbm|pgm|ppm|exr|hdr)\b",
+    ),
     ("hex", r"(0x[0-9a-fA-F]+)"),
     ("kubernetes", "KUBERNETES_KINDS_PLACEHOLDER"),
     // Deployment-managed pod names such as "nginx-deployment-66b6c48dd5-7xb2r":
@@ -56,6 +61,10 @@ pub const BUILTIN_PATTERNS: &[(&str, &str)] = &[
     ),
     ("diff", r"(---|\+\+\+) [ab]/(?P<match>.*)"),
 ];
+
+/// The built-in patterns enabled when the configuration names none: the
+/// ones that find paths and URLs.
+pub const DEFAULT_PATTERNS: &[&str] = &["url", "path", "image", "git-status", "diff"];
 
 /// The names of every built-in pattern, in precedence order.
 pub fn builtin_names() -> Vec<&'static str> {
@@ -110,6 +119,12 @@ pub struct PatternSet {
 }
 
 impl PatternSet {
+    /// The patterns of [`DEFAULT_PATTERNS`], in precedence order.
+    pub fn defaults() -> Self {
+        Self::compile(&builtin_specs(DEFAULT_PATTERNS).expect("defaults are built-ins"))
+            .expect("built-ins compile")
+    }
+
     /// Every built-in pattern, in precedence order.
     pub fn builtin() -> Self {
         Self::compile(&builtin_specs(&builtin_names()).expect("built-ins are valid"))

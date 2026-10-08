@@ -7,10 +7,11 @@ use thiserror::Error;
 
 use crate::adapters::clipboard::SystemClipboard;
 use crate::adapters::config::{self, ConfigError};
+use crate::adapters::files::SystemFiles;
 use crate::adapters::herdr::{HerdrClient, HerdrError, PluginContext};
-use crate::adapters::log;
 use crate::adapters::system::SystemLauncher;
 use crate::adapters::tui::{self, TerminalPicker};
+use crate::adapters::{log, pager, viewer};
 use crate::domain::geometry::{GeometryError, OverlayGeometry};
 use crate::domain::matcher::find_candidates;
 use crate::domain::patterns::{self, PatternError, PatternSet};
@@ -18,6 +19,8 @@ use crate::domain::screen::Screen;
 use crate::domain::session::Session;
 use crate::domain::settings::Settings;
 use crate::usecases::pick::{self, Deps, PickError, PickRequest, Picked};
+use crate::usecases::ports::PortError;
+use crate::usecases::preview::{self, PATH_ENV, PreviewDeps};
 use crate::usecases::start::{self, GEOMETRY_ENV, PATTERNS_ENV, StartError};
 
 #[derive(Debug, Error)]
@@ -38,6 +41,12 @@ pub enum AppError {
     Terminal(#[from] std::io::Error),
     #[error("no focused pane: Herdr did not pass HERDR_PANE_ID")]
     NoFocusedPane,
+    #[error("no path: Herdr did not pass {PATH_ENV}")]
+    NoPath,
+    #[error("usage: herdr-fingers open <path-or-url>")]
+    NoOpenTarget,
+    #[error(transparent)]
+    Port(#[from] PortError),
     #[error("unknown option `{0}`")]
     UnknownOption(String),
 }
@@ -96,8 +105,9 @@ fn run_overlay(context: &PluginContext) -> Result<(), AppError> {
 
     let mut clipboard =
         SystemClipboard::new(settings.clipboard, settings.clipboard_command.clone());
-    let mut picker = TerminalPicker;
+    let mut picker = TerminalPicker::default();
     let request = PickRequest {
+        plugin_id: &context.plugin_id,
         pane_id: &pane_id,
         geometry: geometry.as_ref(),
         settings: &settings,
@@ -105,6 +115,7 @@ fn run_overlay(context: &PluginContext) -> Result<(), AppError> {
     };
     let mut deps = Deps {
         host: &client,
+        files: &SystemFiles,
         clipboard: &mut clipboard,
         launcher: &SystemLauncher,
         picker: &mut picker,
@@ -112,6 +123,53 @@ fn run_overlay(context: &PluginContext) -> Result<(), AppError> {
     if let Picked::Done(message) = pick::pick(&request, &mut deps)? {
         log::append(context.state_dir.as_deref(), &message);
     }
+    Ok(())
+}
+
+/// `view`: runs inside the image popup and draws the image named by
+/// `HERDR_FINGERS_PATH`, stepping through the images next to it.
+pub fn view() -> Result<(), AppError> {
+    let path = std::env::var_os(PATH_ENV).ok_or(AppError::NoPath)?;
+    viewer::show(std::path::Path::new(&path))?;
+    Ok(())
+}
+
+/// `page`: runs inside the text popup and pages the file or lists the
+/// directory named by `HERDR_FINGERS_PATH`.
+pub fn page() -> Result<(), AppError> {
+    let path = std::env::var_os(PATH_ENV).ok_or(AppError::NoPath)?;
+    pager::show(std::path::Path::new(&path))?;
+    Ok(())
+}
+
+/// `open`: previews a path or URL from outside the overlay, for file
+/// managers and scripts that run in a Herdr pane. A relative path is taken
+/// from the current directory.
+pub fn open(args: &[String]) -> Result<(), AppError> {
+    let target = args.first().ok_or(AppError::NoOpenTarget)?;
+    let context = PluginContext::from_env();
+    let config_dir = context.config_dir.clone().or_else(|| {
+        std::env::var_os("HOME").map(|home| {
+            std::path::PathBuf::from(home)
+                .join(".config/herdr/plugins/config")
+                .join(&context.plugin_id)
+        })
+    });
+    let settings = config::load(config_dir.as_deref()).unwrap_or_default();
+    let client = HerdrClient::from_env()?;
+    let cwd = std::env::current_dir().ok();
+    let deps = PreviewDeps {
+        host: &client,
+        files: &SystemFiles,
+        launcher: &SystemLauncher,
+    };
+    preview::preview(
+        target,
+        cwd.as_deref(),
+        &context.plugin_id,
+        &settings.popup,
+        &deps,
+    )?;
     Ok(())
 }
 

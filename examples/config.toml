@@ -21,21 +21,26 @@ keyboard_layout = "qwerty"
 hint_position = "left"
 
 # What happens to the picked text, per key held while typing the hint.
+#   ":menu:"  ask: preview it or copy it. Preview opens a URL in the
+#             browser, an image in an image popup, a text file in a pager
+#             popup (bat, else less, else more) and a directory as `ls -la`
 #   ":copy:"  copy it (see `clipboard` below)
 #   ":paste:" type it into the pane the hints came from
 #   ":open:"  open URLs and files with the system opener
 #   ""        nothing
 # Anything else is a command line, run with the text on its stdin and
 # MODIFIER / HINT in its environment, from the pane's working directory.
-main_action = ":copy:"
+main_action = ":menu:"
 ctrl_action = ":open:"
 shift_action = ":paste:"
 alt_action = ""
 
-# Built-in patterns to look for; omit to enable them all. Known names:
-#   ip, uuid, sha, digit, url, path, hex, kubernetes, kubernetes-pod,
+# Built-in patterns to look for; omit for the paths and URLs:
+#   ["url", "path", "image", "git-status", "diff"]
+# Known names:
+#   ip, uuid, sha, digit, url, path, image, hex, kubernetes, kubernetes-pod,
 #   git-status, git-status-branch, diff
-# enabled_builtin_patterns = ["url", "path", "sha"]
+# enabled_builtin_patterns = ["url", "path", "image", "sha"]
 
 # Your own patterns, in Rust regex syntax. A group named `match` narrows the
 # copied text to that group. When a custom pattern and a built-in start at
@@ -58,6 +63,10 @@ show_copied_notification = false
 
 # Joins the texts picked in multi-select mode (Tab).
 multi_separator = " "
+
+# Size of the preview popups: a cell count or a percentage of the terminal.
+popup_width = "85%"
+popup_height = "85%"
 
 # Colors: names (black, red, green, yellow, blue, magenta, cyan, white, gray,
 # light-red … bright-white), palette indexes (0-255) or "#RRGGBB".

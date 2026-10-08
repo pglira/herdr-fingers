@@ -7,6 +7,7 @@ pub mod geometry;
 pub mod hints;
 pub mod matcher;
 pub mod patterns;
+pub mod preview;
 pub mod screen;
 pub mod session;
 pub mod settings;

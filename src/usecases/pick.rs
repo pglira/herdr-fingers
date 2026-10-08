@@ -1,18 +1,22 @@
-//! `pick`: read the pane, label the matches, let the user choose, act.
+//! `pick`: read the pane, label the matches, let the user choose, act. The
+//! `:menu:` action asks first whether to preview or copy the pick.
 
 use std::path::Path;
 
 use thiserror::Error;
 
-use super::ports::{Clipboard, Launcher, PaneHost, PickView, Picker, PortError};
+use super::ports::{Clipboard, Files, Launcher, PaneHost, PickView, Picker, PortError};
+use super::preview::{self as previewer, PreviewDeps};
 use crate::domain::geometry::OverlayGeometry;
 use crate::domain::matcher::find_candidates;
+use crate::domain::preview::{MenuItem, menu_items};
 use crate::domain::screen::Screen;
 use crate::domain::session::{Outcome, Selection, Session};
 use crate::domain::settings::{Action, Settings};
 
 /// What one run of the overlay works on.
 pub struct PickRequest<'a> {
+    pub plugin_id: &'a str,
     pub pane_id: &'a str,
     /// Where the pane sits in the overlay; `None` when launched by hand.
     pub geometry: Option<&'a OverlayGeometry>,
@@ -24,6 +28,7 @@ pub struct PickRequest<'a> {
 /// The adapters one run of the overlay goes through.
 pub struct Deps<'a> {
     pub host: &'a dyn PaneHost,
+    pub files: &'a dyn Files,
     pub clipboard: &'a mut dyn Clipboard,
     pub launcher: &'a dyn Launcher,
     pub picker: &'a mut dyn Picker,
@@ -69,23 +74,53 @@ pub fn pick(request: &PickRequest<'_>, deps: &mut Deps<'_>) -> Result<Picked, Pi
     match deps.picker.pick(&view, &mut session)? {
         Outcome::Picked(selection) => {
             let cwd = deps.host.pane_cwd(request.pane_id).unwrap_or(None);
-            let message = dispatch(&selection, request, cwd.as_deref(), deps)?;
+            let mut action = request
+                .settings
+                .actions
+                .for_modifier(selection.modifier)
+                .clone();
+            if action == Action::Menu {
+                let title = preview(&selection.texts.join(&request.settings.multi_separator));
+                let items = menu_items(&selection.texts);
+                action = match deps.picker.choose(&view, &session, &title, &items)? {
+                    Some(MenuItem::Copy) => Action::Copy,
+                    Some(MenuItem::Preview) => {
+                        let preview_deps = PreviewDeps {
+                            host: deps.host,
+                            files: deps.files,
+                            launcher: deps.launcher,
+                        };
+                        let message = previewer::preview(
+                            &selection.texts[0],
+                            cwd.as_deref(),
+                            request.plugin_id,
+                            &request.settings.popup,
+                            &preview_deps,
+                        )?;
+                        return Ok(Picked::Done(message));
+                    }
+                    None => return Ok(Picked::Cancelled),
+                };
+            }
+            let message = dispatch(&selection, &action, request, cwd.as_deref(), deps)?;
             Ok(Picked::Done(message))
         }
         Outcome::Cancelled | Outcome::Continue => Ok(Picked::Cancelled),
     }
 }
 
-/// Carries out the action bound to the modifier the user held.
+/// Carries out `action` on the picked texts. `Menu` is resolved by the
+/// caller before it gets here.
 fn dispatch(
     selection: &Selection,
+    action: &Action,
     request: &PickRequest<'_>,
     cwd: Option<&Path>,
     deps: &mut Deps<'_>,
 ) -> Result<String, PickError> {
     let settings = request.settings;
     let text = selection.texts.join(&settings.multi_separator);
-    match settings.actions.for_modifier(selection.modifier) {
+    match action {
         Action::Copy => {
             deps.clipboard.copy(&text)?;
             if settings.notify_on_copy
@@ -113,7 +148,7 @@ fn dispatch(
             deps.launcher.run(command_line, &text, &env, cwd)?;
             Ok(format!("ran {command_line}"))
         }
-        Action::Nothing => Ok(String::new()),
+        Action::Menu | Action::Nothing => Ok(String::new()),
     }
 }
 
@@ -133,14 +168,24 @@ mod tests {
     use super::*;
     use crate::domain::alphabet::Alphabet;
     use crate::domain::geometry::Rect;
+    use crate::domain::preview::Entry;
     use crate::domain::session::{Key, Modifier};
+    use crate::usecases::preview::{PAGER_ENTRYPOINT, PATH_ENV, VIEWER_ENTRYPOINT};
     use crate::usecases::testing::{
-        FakeHost, RecordingClipboard, RecordingLauncher, ScriptedPicker,
+        FakeFiles, FakeHost, RecordingClipboard, RecordingLauncher, ScriptedPicker,
     };
 
     const SCREEN: &str = "edit /etc/hosts now\nsee https://x.io/docs\n";
 
+    /// The defaults with a plain hint copying directly.
     fn settings() -> Settings {
+        let mut settings = menu_settings();
+        settings.actions.main = Action::Copy;
+        settings
+    }
+
+    /// The defaults: a plain hint opens the menu.
+    fn menu_settings() -> Settings {
         Settings {
             alphabet: Alphabet::custom("asdf").unwrap(),
             ..Settings::default()
@@ -157,6 +202,7 @@ mod tests {
 
     struct World {
         host: FakeHost,
+        files: FakeFiles,
         clipboard: RecordingClipboard,
         launcher: RecordingLauncher,
         picker: ScriptedPicker,
@@ -166,6 +212,7 @@ mod tests {
         fn new(keys: &[Key]) -> Self {
             World {
                 host: FakeHost::showing(SCREEN),
+                files: FakeFiles::default(),
                 clipboard: RecordingClipboard::default(),
                 launcher: RecordingLauncher::default(),
                 picker: ScriptedPicker::new(keys),
@@ -179,6 +226,7 @@ mod tests {
             notice: Option<&str>,
         ) -> Picked {
             let request = PickRequest {
+                plugin_id: "id",
                 pane_id: "w1:p1",
                 geometry,
                 settings,
@@ -186,6 +234,7 @@ mod tests {
             };
             let mut deps = Deps {
                 host: &self.host,
+                files: &self.files,
                 clipboard: &mut self.clipboard,
                 launcher: &self.launcher,
                 picker: &mut self.picker,
@@ -312,6 +361,7 @@ mod tests {
         let mut world = World::new(&[Key::Escape]);
         world.host = FakeHost::showing(SCREEN).failing_reads();
         let request = PickRequest {
+            plugin_id: "id",
             pane_id: "w1:p1",
             geometry: None,
             settings: &settings(),
@@ -319,11 +369,82 @@ mod tests {
         };
         let mut deps = Deps {
             host: &world.host,
+            files: &world.files,
             clipboard: &mut world.clipboard,
             launcher: &world.launcher,
             picker: &mut world.picker,
         };
         assert!(matches!(pick(&request, &mut deps), Err(PickError::Port(_))));
+    }
+
+    #[test]
+    fn the_menu_asks_about_the_pick_and_copy_copies() {
+        let mut world = World::new(&[Key::Hint('s', Modifier::Main)]);
+        world.picker =
+            ScriptedPicker::new(&[Key::Hint('s', Modifier::Main)]).choosing(MenuItem::Copy);
+        let picked = world.run(&menu_settings(), Some(&geometry()), None);
+        assert_eq!(picked, Picked::Done("copied /etc/hosts".into()));
+        assert_eq!(
+            world.picker.seen_menu,
+            Some((
+                "/etc/hosts".to_string(),
+                vec![MenuItem::Preview, MenuItem::Copy]
+            ))
+        );
+        assert_eq!(world.clipboard.copied, vec!["/etc/hosts"]);
+    }
+
+    #[test]
+    fn preview_from_the_menu_opens_the_popup_for_the_kind_of_file() {
+        let mut world = World::new(&[]);
+        world.picker =
+            ScriptedPicker::new(&[Key::Hint('s', Modifier::Main)]).choosing(MenuItem::Preview);
+        world.files = FakeFiles::with("/etc/hosts", Entry::File { binary: false });
+        world.run(&menu_settings(), Some(&geometry()), None);
+        let popups = world.host.popups.borrow();
+        assert_eq!(popups[0].1, PAGER_ENTRYPOINT);
+        assert_eq!(popups[0].2[PATH_ENV], "/etc/hosts");
+        assert!(world.clipboard.copied.is_empty());
+    }
+
+    #[test]
+    fn preview_of_an_image_relative_to_the_pane_opens_the_viewer() {
+        let mut world = World::new(&[]);
+        world.host = FakeHost::showing("wrote plot.png\n").in_directory("/work");
+        world.picker =
+            ScriptedPicker::new(&[Key::Hint('a', Modifier::Main)]).choosing(MenuItem::Preview);
+        world.files = FakeFiles::with("/work/plot.png", Entry::File { binary: true });
+        world.run(&menu_settings(), Some(&geometry()), None);
+        let popups = world.host.popups.borrow();
+        assert_eq!(popups[0].1, VIEWER_ENTRYPOINT);
+        assert_eq!(popups[0].2[PATH_ENV], "/work/plot.png");
+    }
+
+    #[test]
+    fn closing_the_menu_does_nothing() {
+        let mut world = World::new(&[]);
+        world.picker = ScriptedPicker::new(&[Key::Hint('s', Modifier::Main)]);
+        assert_eq!(
+            world.run(&menu_settings(), Some(&geometry()), None),
+            Picked::Cancelled
+        );
+        assert!(world.clipboard.copied.is_empty());
+        assert!(world.host.popups.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_multi_pick_menu_offers_only_copy() {
+        let mut world = World::new(&[]);
+        world.picker = ScriptedPicker::new(&[
+            Key::Tab,
+            Key::Hint('a', Modifier::Main),
+            Key::Hint('s', Modifier::Main),
+            Key::Enter,
+        ])
+        .choosing(MenuItem::Copy);
+        world.run(&menu_settings(), Some(&geometry()), None);
+        assert_eq!(world.picker.seen_menu.unwrap().1, vec![MenuItem::Copy]);
+        assert_eq!(world.clipboard.copied, vec!["https://x.io/docs /etc/hosts"]);
     }
 
     #[test]

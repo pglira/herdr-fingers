@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::domain::geometry::{Layout, OverlayGeometry};
+use crate::domain::preview::{Entry, MenuItem};
 use crate::domain::screen::Screen;
 use crate::domain::session::{Outcome, Session};
-use crate::domain::settings::Theme;
+use crate::domain::settings::{PopupSize, Theme};
 
 /// An adapter failed; the message is already fit for a human.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -38,6 +39,14 @@ pub trait PaneHost {
         entrypoint: &str,
         env: BTreeMap<String, String>,
     ) -> Result<String, PortError>;
+    /// Opens one of this plugin's declared panes as a focused popup of `size`.
+    fn open_popup(
+        &self,
+        plugin_id: &str,
+        entrypoint: &str,
+        env: BTreeMap<String, String>,
+        size: &PopupSize,
+    ) -> Result<(), PortError>;
     /// Types `text` into the pane as if the user had.
     fn send_text(&self, pane_id: &str, text: &str) -> Result<(), PortError>;
     /// Shows a toast.
@@ -47,6 +56,14 @@ pub trait PaneHost {
 /// Where `:copy:` puts the text.
 pub trait Clipboard {
     fn copy(&mut self, text: &str) -> Result<(), PortError>;
+}
+
+/// The file system, as far as previews go.
+pub trait Files {
+    /// What is at `path`.
+    fn entry(&self, path: &Path) -> Entry;
+    /// The user's home directory, for `~/` paths.
+    fn home(&self) -> Option<PathBuf>;
 }
 
 /// Opens things and runs the user's own commands.
@@ -77,4 +94,13 @@ pub struct PickView<'a> {
 /// returns when the user has picked or given up.
 pub trait Picker {
     fn pick(&mut self, view: &PickView<'_>, session: &mut Session) -> Result<Outcome, PortError>;
+    /// Shows the menu `items` for the picked `title` over the same view;
+    /// `None` when the user closes it without a choice.
+    fn choose(
+        &mut self,
+        view: &PickView<'_>,
+        session: &Session,
+        title: &str,
+        items: &[MenuItem],
+    ) -> Result<Option<MenuItem>, PortError>;
 }

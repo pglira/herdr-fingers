@@ -3,6 +3,7 @@
 
 pub mod pick;
 pub mod ports;
+pub mod preview;
 pub mod start;
 
 #[cfg(test)]

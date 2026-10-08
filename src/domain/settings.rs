@@ -6,10 +6,12 @@ use super::patterns::PatternSet;
 use super::session::Modifier;
 use super::style::{Color, TextStyle};
 
-/// What happens to the picked text. `Shell` runs a command with the text on
-/// its stdin and `MODIFIER`/`HINT` in its environment, like tmux-fingers.
+/// What happens to the picked text. `Menu` asks whether to preview or copy
+/// it. `Shell` runs a command with the text on its stdin and `MODIFIER`/`HINT`
+/// in its environment, like tmux-fingers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    Menu,
     Copy,
     Paste,
     Open,
@@ -18,11 +20,12 @@ pub enum Action {
 }
 
 impl Action {
-    /// `:copy:`, `:paste:`, `:open:`, an empty string for nothing, or a
-    /// shell command line.
+    /// `:menu:`, `:copy:`, `:paste:`, `:open:`, an empty string for nothing,
+    /// or a shell command line.
     pub fn parse(value: &str) -> Action {
         match value.trim() {
             "" => Action::Nothing,
+            ":menu:" => Action::Menu,
             ":copy:" => Action::Copy,
             ":paste:" => Action::Paste,
             ":open:" => Action::Open,
@@ -54,7 +57,7 @@ impl Actions {
 impl Default for Actions {
     fn default() -> Self {
         Actions {
-            main: Action::Copy,
+            main: Action::Menu,
             ctrl: Action::Open,
             shift: Action::Paste,
             alt: Action::Nothing,
@@ -110,6 +113,33 @@ impl Default for Theme {
     }
 }
 
+/// The size of a preview popup: a cell count or a percentage ("85%") of the
+/// terminal, per axis, as the Herdr API takes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PopupSize {
+    pub width: String,
+    pub height: String,
+}
+
+impl Default for PopupSize {
+    fn default() -> Self {
+        PopupSize {
+            width: "85%".to_string(),
+            height: "85%".to_string(),
+        }
+    }
+}
+
+impl PopupSize {
+    /// Accepts a positive cell count or a percentage from 1% to 100%.
+    pub fn is_valid(value: &str) -> bool {
+        match value.strip_suffix('%') {
+            Some(percent) => percent.parse::<u8>().is_ok_and(|n| (1..=100).contains(&n)),
+            None => value.parse::<u16>().is_ok_and(|n| n > 0),
+        }
+    }
+}
+
 /// The validated configuration of one run.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -121,19 +151,21 @@ pub struct Settings {
     pub clipboard_command: Vec<String>,
     pub notify_on_copy: bool,
     pub multi_separator: String,
+    pub popup: PopupSize,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             alphabet: Alphabet::default(),
-            patterns: PatternSet::builtin(),
+            patterns: PatternSet::defaults(),
             theme: Theme::default(),
             actions: Actions::default(),
             clipboard: ClipboardMode::default(),
             clipboard_command: Vec::new(),
             notify_on_copy: false,
             multi_separator: " ".to_string(),
+            popup: PopupSize::default(),
         }
     }
 }
@@ -147,6 +179,7 @@ mod tests {
         assert_eq!(Action::parse(":copy:"), Action::Copy);
         assert_eq!(Action::parse(" :open: "), Action::Open);
         assert_eq!(Action::parse(""), Action::Nothing);
+        assert_eq!(Action::parse(":menu:"), Action::Menu);
         assert_eq!(
             Action::parse("xargs nvim"),
             Action::Shell("xargs nvim".into())
@@ -154,9 +187,9 @@ mod tests {
     }
 
     #[test]
-    fn default_actions_mirror_tmux_fingers() {
+    fn a_plain_hint_opens_the_menu_and_the_modifiers_mirror_tmux_fingers() {
         let actions = Actions::default();
-        assert_eq!(actions.for_modifier(Modifier::Main), &Action::Copy);
+        assert_eq!(actions.for_modifier(Modifier::Main), &Action::Menu);
         assert_eq!(actions.for_modifier(Modifier::Ctrl), &Action::Open);
         assert_eq!(actions.for_modifier(Modifier::Shift), &Action::Paste);
         assert_eq!(actions.for_modifier(Modifier::Alt), &Action::Nothing);

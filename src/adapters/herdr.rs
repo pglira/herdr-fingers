@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::domain::geometry::{Layout, PanePlacement, Rect};
+use crate::domain::settings::PopupSize;
 use crate::usecases::ports::{PaneHost, PortError};
 
 #[derive(Debug, Error)]
@@ -223,6 +224,29 @@ impl HerdrClient {
             })
     }
 
+    /// Opens a declared pane as a focused popup of `size`.
+    pub fn open_plugin_popup(
+        &self,
+        plugin_id: &str,
+        entrypoint: &str,
+        env: BTreeMap<String, String>,
+        size: &PopupSize,
+    ) -> Result<(), HerdrError> {
+        self.call(
+            "plugin.pane.open",
+            json!({
+                "plugin_id": plugin_id,
+                "entrypoint": entrypoint,
+                "placement": "popup",
+                "width": popup_size_value(&size.width),
+                "height": popup_size_value(&size.height),
+                "focus": true,
+                "env": env
+            }),
+        )?;
+        Ok(())
+    }
+
     pub fn send_text(&self, pane_id: &str, text: &str) -> Result<(), HerdrError> {
         self.call(
             "pane.send_text",
@@ -272,12 +296,31 @@ impl PaneHost for HerdrClient {
         Ok(self.open_plugin_pane(plugin_id, entrypoint, env)?)
     }
 
+    fn open_popup(
+        &self,
+        plugin_id: &str,
+        entrypoint: &str,
+        env: BTreeMap<String, String>,
+        size: &PopupSize,
+    ) -> Result<(), PortError> {
+        Ok(self.open_plugin_popup(plugin_id, entrypoint, env, size)?)
+    }
+
     fn send_text(&self, pane_id: &str, text: &str) -> Result<(), PortError> {
         Ok(HerdrClient::send_text(self, pane_id, text)?)
     }
 
     fn notify(&self, title: &str, body: &str) -> Result<(), PortError> {
         Ok(HerdrClient::notify(self, title, body)?)
+    }
+}
+
+/// The API takes a popup size as a cell count (a number) or a percentage
+/// (a string such as "85%").
+fn popup_size_value(size: &str) -> Value {
+    match size.parse::<u64>() {
+        Ok(cells) => json!(cells),
+        Err(_) => json!(size),
     }
 }
 
